@@ -130,10 +130,32 @@
       window.addEventListener("focus", () => canvas.focus());
       canvas.addEventListener("click", () => canvas.focus());
 
-      // Prevent the Space / arrow keys from scrolling the iframe.
-      window.addEventListener(
-        "keydown",
-        (e) => {
+      // WASD → modern FPS layout. W/S = forward/back (arrows), A/D = strafe
+      // (Doom's default strafe-left/right keys are ',' and '.'). Arrow keys
+      // still work natively, so Left/Right can be used for turning.
+      const KEY_REMAP = {
+        KeyW: { code: "ArrowUp", key: "ArrowUp", keyCode: 38 },
+        KeyS: { code: "ArrowDown", key: "ArrowDown", keyCode: 40 },
+        KeyA: { code: "Comma", key: ",", keyCode: 188 },
+        KeyD: { code: "Period", key: ".", keyCode: 190 },
+      };
+
+      function dispatchKey(type, spec) {
+        const ev = new KeyboardEvent(type, {
+          code: spec.code,
+          key: spec.key,
+          keyCode: spec.keyCode,
+          which: spec.keyCode,
+          bubbles: true,
+          cancelable: true,
+        });
+        window.dispatchEvent(ev);
+      }
+
+      function remapKey(e) {
+        const mapped = KEY_REMAP[e.code];
+        if (!mapped) {
+          // Still swallow scroll keys (arrows / space) so the page doesn't move.
           if (
             ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(
               e.key,
@@ -141,9 +163,102 @@
           ) {
             e.preventDefault();
           }
-        },
-        { passive: false },
-      );
+          return;
+        }
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (e.repeat) return;
+        dispatchKey(e.type, mapped);
+      }
+      window.addEventListener("keydown", remapKey, {
+        capture: true,
+        passive: false,
+      });
+      window.addEventListener("keyup", remapKey, {
+        capture: true,
+        passive: false,
+      });
+
+      // Left mouse click → fire (Doom default fire is Ctrl).
+      const FIRE_KEY = {
+        code: "ControlLeft",
+        key: "Control",
+        keyCode: 17,
+      };
+      const TURN_LEFT = { code: "ArrowLeft", key: "ArrowLeft", keyCode: 37 };
+      const TURN_RIGHT = { code: "ArrowRight", key: "ArrowRight", keyCode: 39 };
+
+      let firing = false;
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        // Request pointer lock on click so mouse can turn the view.
+        if (document.pointerLockElement !== canvas) {
+          canvas.requestPointerLock?.();
+        }
+        if (firing) return;
+        firing = true;
+        dispatchKey("keydown", FIRE_KEY);
+      });
+      const releaseFire = (e) => {
+        if (!firing) return;
+        if (e && e.button !== undefined && e.button !== 0) return;
+        firing = false;
+        dispatchKey("keyup", FIRE_KEY);
+      };
+      window.addEventListener("mouseup", releaseFire);
+      window.addEventListener("blur", () => releaseFire());
+      canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+
+      // Mouse-look: convert horizontal pointer motion into synthetic
+      // Left/Right arrow holds. We synthesize key events instead of relying
+      // on Doom's SDL mouse-turn so we can ignore Y motion (which would
+      // otherwise also drive forward/back and fight with W/S).
+      const TURN_SENSITIVITY = 0.6; // how fast pixels of motion accumulate
+      const TURN_DEADZONE = 0.5; // px-equivalent below which we release keys
+      const TURN_DECAY = 0.82; // per-frame falloff so keys release when still
+      let turnAccum = 0;
+      let turnHeld = 0; // -1 left, 0 none, +1 right
+
+      function releaseTurn() {
+        if (turnHeld === -1) dispatchKey("keyup", TURN_LEFT);
+        else if (turnHeld === 1) dispatchKey("keyup", TURN_RIGHT);
+        turnHeld = 0;
+      }
+
+      function turnLoop() {
+        if (document.pointerLockElement === canvas) {
+          if (turnAccum > TURN_DEADZONE && turnHeld !== 1) {
+            releaseTurn();
+            turnHeld = 1;
+            dispatchKey("keydown", TURN_RIGHT);
+          } else if (turnAccum < -TURN_DEADZONE && turnHeld !== -1) {
+            releaseTurn();
+            turnHeld = -1;
+            dispatchKey("keydown", TURN_LEFT);
+          } else if (
+            Math.abs(turnAccum) <= TURN_DEADZONE &&
+            turnHeld !== 0
+          ) {
+            releaseTurn();
+          }
+          turnAccum *= TURN_DECAY;
+        }
+        requestAnimationFrame(turnLoop);
+      }
+      requestAnimationFrame(turnLoop);
+
+      window.addEventListener("mousemove", (e) => {
+        if (document.pointerLockElement !== canvas) return;
+        turnAccum += e.movementX * TURN_SENSITIVITY;
+      });
+
+      document.addEventListener("pointerlockchange", () => {
+        if (document.pointerLockElement !== canvas) {
+          turnAccum = 0;
+          releaseTurn();
+        }
+      });
 
       // Load the doom module.
       setStatus("Loading doomgeneric…");
