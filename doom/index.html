@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Doom</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                background: #000;
+                color: #eee;
+                font-family:
+                    ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                font-size: 12px;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+            #root {
+                position: fixed;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #canvas {
+                display: block;
+                width: 100%;
+                height: 100%;
+                image-rendering: pixelated;
+                image-rendering: crisp-edges;
+                background: #000;
+                outline: none;
+            }
+            #status {
+                position: fixed;
+                top: 8px;
+                left: 8px;
+                padding: 6px 10px;
+                background: rgba(0, 0, 0, 0.7);
+                border-radius: 4px;
+                pointer-events: none;
+                white-space: pre-line;
+                max-width: 80%;
+            }
+            #status.hidden {
+                display: none;
+            }
+            #start {
+                position: fixed;
+                inset: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(0, 0, 0, 0.8);
+                cursor: pointer;
+                user-select: none;
+                font-size: 14px;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+            }
+            #start.hidden {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="root">
+            <canvas id="canvas" tabindex="0"></canvas>
+        </div>
+        <div id="status">Loading…</div>
+        <div id="start">Click to start</div>
+
+        <script>
+            const statusEl = document.getElementById("status");
+            const startEl = document.getElementById("start");
+            const canvas = document.getElementById("canvas");
+
+            function setStatus(text) {
+                if (!text) {
+                    statusEl.classList.add("hidden");
+                    return;
+                }
+                statusEl.classList.remove("hidden");
+                statusEl.textContent = text;
+            }
+
+            // Doomgeneric's SDL renderer doesn't auto-resize on canvas style
+            // changes — it uses the canvas backing-store dimensions. We don't
+            // resize after start; SDL set the buffer to 320x200 (then upscaled
+            // via CSS via image-rendering: pixelated).
+
+            let moduleInstance = null;
+            const Module = {
+                canvas,
+                noInitialRun: true,
+                arguments: [],
+                preRun: [],
+                postRun: [],
+                print: (...args) => console.log("[doom]", ...args),
+                printErr: (...args) => console.warn("[doom err]", ...args),
+                setStatus,
+                onAbort: (reason) => {
+                    setStatus("Doom aborted: " + reason);
+                },
+            };
+
+            function start() {
+                startEl.classList.add("hidden");
+                canvas.focus();
+                if (!moduleInstance) return;
+                try {
+                    moduleInstance.callMain([]);
+                    setStatus("");
+                } catch (err) {
+                    // Emscripten throws 'unwind' to keep the main loop alive.
+                    if (
+                        err &&
+                        err.toString &&
+                        err.toString().includes("unwind")
+                    ) {
+                        setStatus("");
+                        return;
+                    }
+                    console.error(err);
+                    setStatus("Doom crashed: " + err);
+                }
+            }
+
+            startEl.addEventListener("click", start);
+
+            // Keep focus on the canvas so SDL gets keystrokes.
+            window.addEventListener("focus", () => canvas.focus());
+            canvas.addEventListener("click", () => canvas.focus());
+
+            // Prevent the Space / arrow keys from scrolling the iframe.
+            window.addEventListener(
+                "keydown",
+                (e) => {
+                    if (
+                        [
+                            "ArrowUp",
+                            "ArrowDown",
+                            "ArrowLeft",
+                            "ArrowRight",
+                            " ",
+                        ].includes(e.key)
+                    ) {
+                        e.preventDefault();
+                    }
+                },
+                { passive: false }
+            );
+
+            // Load the doom module.
+            setStatus("Loading doomgeneric…");
+            const script = document.createElement("script");
+            script.src = "./doomgeneric.js";
+            script.onload = () => {
+                if (typeof createDoomModule !== "function") {
+                    setStatus("doomgeneric.js loaded but no createDoomModule");
+                    return;
+                }
+                createDoomModule(Module).then((mod) => {
+                    moduleInstance = mod;
+                    setStatus("Ready. Click to start.");
+                    startEl.classList.remove("hidden");
+                });
+            };
+            script.onerror = () => {
+                setStatus(
+                    "Failed to load doomgeneric.js.\nDid you run the build? See vendor/doomgeneric/doomgeneric/Makefile.web."
+                );
+            };
+            document.body.appendChild(script);
+        </script>
+    </body>
+</html>
