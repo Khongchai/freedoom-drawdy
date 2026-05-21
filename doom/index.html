@@ -91,9 +91,6 @@
       // resize after start; SDL set the buffer to 320x200 (then upscaled
       // via CSS via image-rendering: pixelated).
 
-      const DATA_URL =
-        "https://github.com/Khongchai/freedoom-drawdy/releases/download/r1/doomgeneric.data";
-
       let moduleInstance = null;
       const Module = {
         canvas,
@@ -103,7 +100,6 @@
         postRun: [],
         print: (...args) => console.log("[doom]", ...args),
         printErr: (...args) => console.warn("[doom err]", ...args),
-        locateFile: (path) => (path.endsWith(".data") ? DATA_URL : path),
         setStatus,
         onAbort: (reason) => {
           setStatus("Doom aborted: " + reason);
